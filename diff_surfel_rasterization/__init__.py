@@ -100,6 +100,7 @@ class _RasterizeGaussians(torch.autograd.Function):
                     geomBuffer,
                     binningBuffer,
                     imgBuffer,
+                    max_alphas,
                 ) = _C.rasterize_gaussians(*args)
             except Exception as ex:
                 torch.save(cpu_args, "snapshot_fw.dump")
@@ -108,9 +109,16 @@ class _RasterizeGaussians(torch.autograd.Function):
                 )
                 raise ex
         else:
-            num_rendered, color, depth, radii, geomBuffer, binningBuffer, imgBuffer = (
-                _C.rasterize_gaussians(*args)
-            )
+            (
+                num_rendered,
+                color,
+                depth,
+                radii,
+                geomBuffer,
+                binningBuffer,
+                imgBuffer,
+                max_alphas,
+            ) = _C.rasterize_gaussians(*args)
 
         # Save tensors required for the backward pass
         ctx.raster_settings = raster_settings
@@ -127,7 +135,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             binningBuffer,
             imgBuffer,
         )
-        return color, radii, depth
+        return color, radii, depth, max_alphas
 
     @staticmethod
     def backward(ctx, grad_out_color, grad_radii, grad_depth):

@@ -91,6 +91,7 @@ RasterizeGaussiansCUDA(
 
   torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
   torch::Tensor out_others = torch::full({3+3+1, H, W}, 0.0, float_opts);
+  torch::Tensor max_alphas = torch::full({P}, 0.0, float_opts);
   torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
   
   // Temporary Buffers which are used internally by the sorter and rasterizer.
@@ -138,11 +139,12 @@ RasterizeGaussiansCUDA(
 		prefiltered,
 		out_color.contiguous().data<float>(),
 		out_others.contiguous().data<float>(),
+		max_alphas.contiguous().data<float>(),
 		radii.contiguous().data<int>(),
 		debug);
   }
   // Return the results to Python
-  return std::make_tuple(rendered, out_color, out_others, radii, geomBuffer, binningBuffer, imgBuffer);
+  return std::make_tuple(rendered, out_color, out_others, radii, geomBuffer, binningBuffer, imgBuffer, max_alphas);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>

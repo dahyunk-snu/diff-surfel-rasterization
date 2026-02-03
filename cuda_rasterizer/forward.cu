@@ -15,6 +15,18 @@
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
 
+__device__ static float atomicMax(float* address, float val)
+{
+	int* address_as_i = (int*)address;
+	int old = *address_as_i, assumed;
+	do {
+		assumed = old;
+		if (__int_as_float(assumed) >= val) break;
+		old = atomicCAS(address_as_i, assumed, __float_as_int(val));
+	} while (assumed != old);
+	return __int_as_float(old);
+}
+
 // Forward method for converting the input spherical harmonics
 // coefficients of each Gaussian to a simple RGB color.
 __device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, bool* clamped)
@@ -270,7 +282,8 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
-	float* __restrict__ out_others)
+	float* __restrict__ out_others,
+	float* __restrict__ max_alphas)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -387,6 +400,9 @@ renderCUDA(
 			float alpha = min(0.99f, opa * exp(power));
 			if (alpha < 1.0f / 255.0f)
 				continue;
+				
+			atomicMax(&max_alphas[collected_id[j]], alpha);
+
 			float test_T = T * (1 - alpha);
 			if (test_T < 0.0001f)
 			{
@@ -463,7 +479,8 @@ void FORWARD::render(
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
-	float* out_others)
+	float* out_others,
+	float* max_alphas)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -479,7 +496,8 @@ void FORWARD::render(
 		n_contrib,
 		bg_color,
 		out_color,
-		out_others);
+		out_others,
+		max_alphas);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
