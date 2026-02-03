@@ -243,7 +243,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		rgb[idx * C + 2] = result.z;
 	}
 
-	depths[idx] = p_view.z;
+	// depths[idx] = p_view.z;
+	depths[idx] = sqrt(p_view.x * p_view.x + p_view.y * p_view.y + p_view.z * p_view.z);
 	radii[idx] = (int)radius;
 	points_xy_image[idx] = point_image;
 	normal_opacity[idx] = {normal.x, normal.y, normal.z, opacities[idx]};

@@ -59,6 +59,7 @@ __device__ const float SH_C3[] = {
 	-0.5900435899266435f
 };
 
+// Convert NDC coordinates to pixel coordinates (-0.5 to W-0.5 / H-0.5)
 __forceinline__ __device__ float ndc2Pix(float v, int S)
 {
 	return ((v + 1.0) * S - 1.0) * 0.5;
@@ -182,6 +183,7 @@ __forceinline__ __device__ float3 maxf3(float f, float3 a){return make_float3(ma
 
 __forceinline__ __device__ float2 maxf2(float f, float2 a){return make_float2(max(f, a.x), max(f, a.y));}
 
+// Check whether a point is in the view frustum - Rotation Invariant
 __forceinline__ __device__ bool in_frustum(int idx,
 	const float* orig_points,
 	const float* viewmatrix,

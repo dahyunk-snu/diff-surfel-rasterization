@@ -24,10 +24,14 @@
 #include <string>
 #include <functional>
 
+// Macro to ensure the input tensor is on the GPU (CUDA device)
 #define CHECK_INPUT(x)											\
 	AT_ASSERTM(x.type().is_cuda(), #x " must be a CUDA tensor")
 	// AT_ASSERTM(x.is_contiguous(), #x " must be contiguous")
 
+// Helper function that allows the C++ rasterizer to dynamically resize PyTorch tensors.
+// This is used for creating temporary buffers (geom, binning, img) whose sizes 
+// are determined during the rasterization process inside the CUDA kernel.
 std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
 	auto lambda = [&t](size_t N) {
 		t.resize_({(long long)N});
@@ -58,15 +62,17 @@ RasterizeGaussiansCUDA(
 	const bool prefiltered,
 	const bool debug)
 {
+  // Ensure 3D means have correct shape (N, 3)
   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
 	AT_ERROR("means3D must have dimensions (num_points, 3)");
   }
 
   
-  const int P = means3D.size(0);
+  const int P = means3D.size(0);  // Number of points (Gaussians)
   const int H = image_height;
   const int W = image_width;
 
+  // Ensure all inputs are on the GPU
   CHECK_INPUT(background);
   CHECK_INPUT(means3D);
   CHECK_INPUT(colors);
@@ -79,6 +85,7 @@ RasterizeGaussiansCUDA(
   CHECK_INPUT(sh);
   CHECK_INPUT(campos);
 
+  // Allocate Output Tensors
   auto int_opts = means3D.options().dtype(torch::kInt32);
   auto float_opts = means3D.options().dtype(torch::kFloat32);
 
@@ -86,6 +93,8 @@ RasterizeGaussiansCUDA(
   torch::Tensor out_others = torch::full({3+3+1, H, W}, 0.0, float_opts);
   torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
   
+  // Temporary Buffers which are used internally by the sorter and rasterizer.
+  // They pass 'resizeFunctional' so the inner C++ code can resize these buffers as needed.
   torch::Device device(torch::kCUDA);
   torch::TensorOptions options(torch::kByte);
   torch::Tensor geomBuffer = torch::empty({0}, options.device(device));
@@ -95,6 +104,7 @@ RasterizeGaussiansCUDA(
   std::function<char*(size_t)> binningFunc = resizeFunctional(binningBuffer);
   std::function<char*(size_t)> imgFunc = resizeFunctional(imgBuffer);
   
+  // Call the actual CUDA Rasterizer
   int rendered = 0;
   if(P != 0)
   {
@@ -104,6 +114,7 @@ RasterizeGaussiansCUDA(
 		M = sh.size(1);
 	  }
 
+	  // Note: .contiguous().data<float>() extracts the raw GPU pointer required by CUDA kernels
 	  rendered = CudaRasterizer::Rasterizer::forward(
 		geomFunc,
 		binningFunc,
@@ -130,6 +141,7 @@ RasterizeGaussiansCUDA(
 		radii.contiguous().data<int>(),
 		debug);
   }
+  // Return the results to Python
   return std::make_tuple(rendered, out_color, out_others, radii, geomBuffer, binningBuffer, imgBuffer);
 }
 
@@ -147,8 +159,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const torch::Tensor& projmatrix,
 	const float tan_fovx,
 	const float tan_fovy,
-	const torch::Tensor& dL_dout_color,
-	const torch::Tensor& dL_dout_others,
+	const torch::Tensor& dL_dout_color,  // Gradient from the loss function w.r.t rendered image
+	const torch::Tensor& dL_dout_others, // Gradient w.r.t auxiliary outputs
 	const torch::Tensor& sh,
 	const int degree,
 	const torch::Tensor& campos,
@@ -159,6 +171,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const bool debug) 
 {
 
+  // Ensure all inputs are on the GPU
   CHECK_INPUT(background);
   CHECK_INPUT(means3D);
   CHECK_INPUT(radii);
@@ -184,6 +197,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	M = sh.size(1);
   }
 
+  // Allocate Gradient Tensors
   torch::Tensor dL_dmeans3D = torch::zeros({P, 3}, means3D.options());
   torch::Tensor dL_dmeans2D = torch::zeros({P, 3}, means3D.options());
   torch::Tensor dL_dcolors = torch::zeros({P, NUM_CHANNELS}, means3D.options());
@@ -194,6 +208,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   torch::Tensor dL_dscales = torch::zeros({P, 2}, means3D.options());
   torch::Tensor dL_drotations = torch::zeros({P, 4}, means3D.options());
   
+  // Call the actual CUDA Backward Rasterizer
   if(P != 0)
   {  
 	  CudaRasterizer::Rasterizer::backward(P, degree, M, R,
@@ -229,6 +244,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  debug);
   }
 
+  // Return the computed gradients to Python
   return std::make_tuple(dL_dmeans2D, dL_dcolors, dL_dopacity, dL_dmeans3D, dL_dtransMat, dL_dsh, dL_dscales, dL_drotations);
 }
 
